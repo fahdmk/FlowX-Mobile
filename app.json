@@ -5,9 +5,16 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "myapp",
+    "scheme": "flowx",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "owner": "fahdmk" ,
+    "extra": {
+      "supabase": {
+        "url": "https://fjkgjkkaiarvtpjqwqkq.supabase.co",
+        "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqa2dqa2thaWFydnRwanF3cWtxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDA2MDQ0ODYsImV4cCI6MjA1NjE4MDQ4Nn0.lMJ4CVyRgMM6d8VXuqnUSvcVFMf5-GHOQx9Xx4R8N-E"
+      }
+    },
     "ios": {
       "supportsTablet": true
     },
@@ -20,7 +27,8 @@
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "redirectUrl": "flowx://"
     },
     "plugins": [
       "expo-router",
@@ -32,7 +40,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
-      ]
+      ],
+      "expo-barcode-scanner"
     ],
     "experiments": {
       "typedRoutes": true

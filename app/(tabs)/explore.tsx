@@ -1,109 +1,360 @@
-import { StyleSheet, Image, Platform } from 'react-native';
+"use client"
 
-import { Collapsible } from '@/components/Collapsible';
-import { ExternalLink } from '@/components/ExternalLink';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
-import { IconSymbol } from '@/components/ui/IconSymbol';
+import { useState, useEffect } from "react"
+import { StyleSheet, View, Text, ScrollView } from "react-native"
+import { Button } from "react-native-paper"
+import { AntDesign, MaterialCommunityIcons } from "@expo/vector-icons"
+import { Camera } from "expo-camera"
+import supabase from "../../Config/SuperbaseClient"
+import type { Product } from "../types/Product"
 
-export default function TabTwoScreen() {
+
+import MainPageProductCard from "../components/MainPageProductCard"
+import ProductSelectionModal from "../components/ProductSelectionModal"
+import ScannerModal from "../components/ScannerModal"
+import Pagination from "../components/Pagination"
+
+export default function ProductsScreen() {
+  const [selectedProducts, setSelectedProducts] = useState<number[]>([])
+  const [modalVisible, setModalVisible] = useState(false)
+  const [scannerVisible, setScannerVisible] = useState(false)
+  const [tempSelectedProducts, setTempSelectedProducts] = useState<number[]>([])
+  const [productQuantities, setProductQuantities] = useState<Record<number, number | string>>({})
+  const [searchQuery, setSearchQuery] = useState("")
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null)
+  const [scanned, setScanned] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [modalCurrentPage, setModalCurrentPage] = useState(1)
+  const [products, setProducts] = useState<Product[]>([])
+
+  const itemsPerPage = 5
+
+  // Mock functions for handleDelete and openEditModal
+  const handleDelete = (productId: number) => {
+    console.log(`Delete product with ID: ${productId}`)
+    // Implement your delete logic here
+  }
+
+  const openEditModal = (productId: number) => {
+    console.log(`Open edit modal for product with ID: ${productId}`)
+    // Implement your edit modal logic here
+  }
+
+  useEffect(() => {
+    const fetchProducts = async () => {
+      const { data, error } = await supabase
+        .from("products")
+        .select("product_id, product_name, brand_id, product_length, product_depth, product_width, base_price, qr_code")
+
+      if (error) {
+        console.error(error)
+      } else {
+        const mappedProducts = data?.map((item) => ({
+          product_id: item.product_id,
+          product_name: item.product_name,
+          brand_id: item.brand_id,
+          product_length: item.product_length,
+          product_depth: item.product_depth,
+          product_width: item.product_width,
+          base_price: item.base_price,
+          qr_code: item.qr_code,
+          hierarchy_id: null,
+          imageUrl: "",
+          isInStock: false,
+          arrivalDate: "",
+        }))
+        setProducts(mappedProducts || [])
+      }
+    }
+
+    fetchProducts()
+  }, [])
+
+  const handleSaveChanges = async () => {
+    if (selectedProducts.length === 0) {
+      alert("No products selected.")
+      return
+    }
+
+    try {
+      // First, get existing records
+      const { data: existingRecords, error: checkError } = await supabase
+        .from("real_time_inventory")
+        .select("inventory_id, store_id, product_id, current_quantity")
+        .in("product_id", selectedProducts)
+        .eq("store_id", 1)
+
+      if (checkError) {
+        console.error("Error checking existing records:", checkError)
+        alert("Failed to check existing records. Please try again.")
+        return
+      }
+
+      const existingMap = new Map(existingRecords?.map((record) => [`${record.store_id}-${record.product_id}`, record]))
+
+      const updatePromises = []
+      const insertRows = []
+
+      for (const productId of selectedProducts) {
+        const key = `1-${productId}`
+        // Parse the quantity here, when needed for database operations
+        const quantityValue = productQuantities[productId] || "0"
+        const newQuantity = Number.parseInt(String(quantityValue), 10) || 0
+
+        if (existingMap.has(key)) {
+          // Update existing record
+          const existingRecord = existingMap.get(key)
+          updatePromises.push(
+            supabase
+              .from("real_time_inventory")
+              .update({
+                current_quantity: existingRecord?.current_quantity + newQuantity,
+                last_updated: new Date().toISOString(),
+              })
+              .eq("inventory_id", existingRecord?.inventory_id),
+          )
+        } else {
+          // Prepare for insertion
+          insertRows.push({
+            store_id: 1,
+            product_id: productId,
+            current_quantity: newQuantity,
+            last_updated: new Date().toISOString(),
+          })
+        }
+      }
+
+      // Perform all updates
+      if (updatePromises.length > 0) {
+        const updateResults = await Promise.all(updatePromises)
+        const updateErrors = updateResults.filter((result) => result.error)
+        if (updateErrors.length > 0) {
+          console.error("Errors updating records:", updateErrors)
+          alert("Some records could not be updated. Please check the console for details.")
+        }
+      }
+
+      // Perform insertions
+      if (insertRows.length > 0) {
+        const { data: insertedData, error: insertError } = await supabase.from("real_time_inventory").insert(insertRows)
+
+        if (insertError) {
+          console.error("Error inserting new records:", insertError)
+          alert("Some new records could not be inserted. Please check the console for details.")
+        }
+      }
+
+      alert("Products saved to inventory successfully!")
+      setSelectedProducts([]) // Clear selected products after saving
+      setProductQuantities({}) // Clear quantities
+    } catch (error) {
+      console.error("Unexpected error:", error)
+      alert("An unexpected error occurred. Please try again.")
+    }
+  }
+
+  const paginateItems = <T,>(items: T[], page: number): T[] => {
+    const startIndex = (page - 1) * itemsPerPage
+    return items.slice(startIndex, startIndex + itemsPerPage)
+  }
+
+  const getSelectedProducts = () => {
+    const selected = products.filter((product) => selectedProducts.includes(product.product_id))
+    return paginateItems(selected, currentPage)
+  }
+
+  const filteredProducts = products.filter(
+    (product) =>
+      (product.product_name?.toLowerCase() || "").includes(searchQuery.toLowerCase()) ||
+      (product.qr_code?.toLowerCase() || "").includes(searchQuery.toLowerCase()),
+  )
+
+  const paginatedFilteredProducts = paginateItems(filteredProducts, modalCurrentPage)
+
+  useEffect(() => {
+    const getCameraPermissions = async () => {
+      const { status } = await Camera.requestCameraPermissionsAsync()
+      setHasPermission(status === "granted")
+    }
+
+    getCameraPermissions()
+  }, [])
+
+  const handleBarcodeScanned = ({ type, data }: { type: string; data: string }) => {
+    setScanned(true)
+    const product = products.find((p) => String(p.product_id) === data)
+    if (product && !selectedProducts.includes(product.product_id)) {
+      setSelectedProducts((prev) => [...prev, product.product_id])
+      setProductQuantities((prev) => ({ ...prev, [product.product_id]: 1 }))
+    }
+    setScannerVisible(false)
+  }
+
+  const removeProduct = (productId: number) => {
+    setSelectedProducts((prev) => prev.filter((id) => id !== productId))
+    setProductQuantities((prev) => {
+      const newQuantities = { ...prev }
+      delete newQuantities[productId]
+      return newQuantities
+    })
+  }
+
+  const handleCheckboxChange = (itemId: number) => {
+    setTempSelectedProducts((prevSelected) => {
+      if (prevSelected.includes(itemId)) {
+        return prevSelected.filter((id) => id !== itemId)
+      } else {
+        setProductQuantities((prev) => ({
+          ...prev,
+          [itemId]: prev[itemId] || 1,
+        }))
+        return [...prevSelected, itemId]
+      }
+    })
+  }
+
+  useEffect(() => {
+    const selectedWithQuantities = selectedProducts.map((id) => ({
+      product_id: id,
+      quantity: productQuantities[id] || 1,
+    }))
+    console.log("Selected Products:", selectedWithQuantities)
+  }, [selectedProducts, productQuantities])
+
+  const handleConfirmSelection = () => {
+    setSelectedProducts(tempSelectedProducts)
+    setModalVisible(false)
+
+    // Log selected products with their quantities
+    const selectedWithQuantities = tempSelectedProducts.map((id) => ({
+      product_id: id,
+      quantity: productQuantities[id] || 1,
+    }))
+    console.log("Selected Products:", selectedWithQuantities)
+  }
+
+  const handleOpenModal = () => {
+    setTempSelectedProducts(selectedProducts)
+    setModalVisible(true)
+  }
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#D0D0D0', dark: '#353636' }}
-      headerImage={
-        <IconSymbol
-          size={310}
-          color="#808080"
-          name="chevron.left.forwardslash.chevron.right"
-          style={styles.headerImage}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Explore</ThemedText>
-      </ThemedView>
-      <ThemedText>This app includes example code to help you get started.</ThemedText>
-      <Collapsible title="File-based routing">
-        <ThemedText>
-          This app has two screens:{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/explore.tsx</ThemedText>
-        </ThemedText>
-        <ThemedText>
-          The layout file in <ThemedText type="defaultSemiBold">app/(tabs)/_layout.tsx</ThemedText>{' '}
-          sets up the tab navigator.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/router/introduction">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Android, iOS, and web support">
-        <ThemedText>
-          You can open this project on Android, iOS, and the web. To open the web version, press{' '}
-          <ThemedText type="defaultSemiBold">w</ThemedText> in the terminal running this project.
-        </ThemedText>
-      </Collapsible>
-      <Collapsible title="Images">
-        <ThemedText>
-          For static images, you can use the <ThemedText type="defaultSemiBold">@2x</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">@3x</ThemedText> suffixes to provide files for
-          different screen densities
-        </ThemedText>
-        <Image source={require('@/assets/images/react-logo.png')} style={{ alignSelf: 'center' }} />
-        <ExternalLink href="https://reactnative.dev/docs/images">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Custom fonts">
-        <ThemedText>
-          Open <ThemedText type="defaultSemiBold">app/_layout.tsx</ThemedText> to see how to load{' '}
-          <ThemedText style={{ fontFamily: 'SpaceMono' }}>
-            custom fonts such as this one.
-          </ThemedText>
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/versions/latest/sdk/font">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Light and dark mode components">
-        <ThemedText>
-          This template has light and dark mode support. The{' '}
-          <ThemedText type="defaultSemiBold">useColorScheme()</ThemedText> hook lets you inspect
-          what the user's current color scheme is, and so you can adjust UI colors accordingly.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/develop/user-interface/color-themes/">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Animations">
-        <ThemedText>
-          This template includes an example of an animated component. The{' '}
-          <ThemedText type="defaultSemiBold">components/HelloWave.tsx</ThemedText> component uses
-          the powerful <ThemedText type="defaultSemiBold">react-native-reanimated</ThemedText>{' '}
-          library to create a waving hand animation.
-        </ThemedText>
-        {Platform.select({
-          ios: (
-            <ThemedText>
-              The <ThemedText type="defaultSemiBold">components/ParallaxScrollView.tsx</ThemedText>{' '}
-              component provides a parallax effect for the header image.
-            </ThemedText>
-          ),
-        })}
-      </Collapsible>
-    </ParallaxScrollView>
-  );
+    <View style={styles.container}>
+      <View style={styles.buttonContainer}>
+        <Button
+          mode="contained"
+          onPress={handleOpenModal}
+          style={[styles.selectButton, { flex: 1, marginRight: 8 }]}
+          icon={({ size, color }) => <AntDesign name="plus" size={size} color={"white"} />}
+        >
+          Select Products to add
+        </Button>
+        <Button
+          mode="contained"
+          onPress={() => setScannerVisible(true)}
+          style={[styles.selectButton, { width: 90, paddingHorizontal: 10 }]}
+        >
+          <MaterialCommunityIcons name="barcode-scan" size={20} color={"white"} />
+        </Button>
+      </View>
+
+      <Pagination
+        currentPage={currentPage}
+        totalItems={selectedProducts.length}
+        onPageChange={setCurrentPage}
+        itemsPerPage={itemsPerPage}
+      />
+
+      <ScrollView style={styles.scrollView}>
+        {getSelectedProducts().length > 0 ? (
+          getSelectedProducts().map((item) => (
+            <MainPageProductCard
+              key={item.product_id}
+              item={item}
+              productQuantities={productQuantities}
+              setProductQuantities={setProductQuantities}
+              handleDelete={handleDelete}
+              openEditModal={openEditModal}
+            />
+          ))
+        ) : (
+          <Text style={styles.emptyText}>No products to add</Text>
+        )}
+      </ScrollView>
+
+      <ProductSelectionModal
+        visible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        modalCurrentPage={modalCurrentPage}
+        paginatedFilteredProducts={paginatedFilteredProducts}
+        filteredProducts={filteredProducts}
+        setModalCurrentPage={setModalCurrentPage}
+        tempSelectedProducts={tempSelectedProducts}
+        productQuantities={productQuantities}
+        setProductQuantities={setProductQuantities}
+        handleCheckboxChange={handleCheckboxChange}
+        handleConfirmSelection={handleConfirmSelection}
+        itemsPerPage={itemsPerPage}
+      />
+
+      <ScannerModal
+        visible={scannerVisible}
+        onClose={() => setScannerVisible(false)}
+        hasPermission={hasPermission}
+        scanned={scanned}
+        handleBarcodeScanned={handleBarcodeScanned}
+        setScanned={setScanned}
+      />
+
+      <View style={styles.saveButtonContainer}>
+        <Button
+          mode="contained"
+          onPress={handleSaveChanges}
+          style={styles.saveButton}
+          icon={({ size, color }) => <MaterialCommunityIcons name="content-save" size={size} color={"white"} />}
+        >
+          Save Selected Products
+        </Button>
+      </View>
+    </View>
+  )
 }
 
 const styles = StyleSheet.create({
-  headerImage: {
-    color: '#808080',
-    bottom: -90,
-    left: -35,
-    position: 'absolute',
+  container: {
+    flex: 1,
+    backgroundColor: "#efefef",
   },
-  titleContainer: {
-    flexDirection: 'row',
-    gap: 8,
+  scrollView: {
+    flex: 1,
+    padding: 16,
+    backgroundColor: "#efefef",
   },
-});
+  selectButton: {
+    margin: 16,
+    backgroundColor: "black",
+  },
+  emptyText: {
+    textAlign: "center",
+    marginTop: 20,
+    fontSize: 16,
+    color: "gray",
+  },
+  buttonContainer: {
+    flexDirection: "row",
+    margin: 16,
+    alignItems: "center",
+  },
+  saveButtonContainer: {
+    padding: 16,
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderTopColor: "#e0e0e0",
+  },
+  saveButton: {
+    backgroundColor: "black",
+    paddingVertical: 8,
+  },
+})
