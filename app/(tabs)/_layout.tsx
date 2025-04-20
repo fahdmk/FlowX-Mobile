@@ -74,6 +74,30 @@ export default function TabLayout() {
           
         }}
       />
+       <Tabs.Screen
+        name="schedule"
+        options={{
+          title: "My Schedule",
+          headerShown: true,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              size={28}
+              name="calendar-outline"
+              color={focused ? "#000000" : "#D3D3D3"} 
+            />
+          ),
+          headerTitle: "Schedule",
+          headerStyle: {
+            backgroundColor: "#fff",
+          },
+          headerTitleStyle: {
+            color: "#000000",
+          },
+          tabBarActiveTintColor: "#000000",
+          tabBarInactiveTintColor: "#D3D3D3",
+          
+        }}
+      />
     </Tabs>
   );
 }
